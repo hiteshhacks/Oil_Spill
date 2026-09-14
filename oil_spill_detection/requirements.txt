@@ -1,0 +1,14 @@
+# Core dependencies for Oil Spill Detection
+numpy
+pandas
+opencv-python
+matplotlib
+torch
+torchvision
+scikit-learn
+geopandas
+rasterio
+shapely
+streamlit
+seaborn 
+folium
