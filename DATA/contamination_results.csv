@@ -1,0 +1,4 @@
+contamination,total_anomalies,anomaly_rate,rule_anomalies,detected_rule_anomalies,coverage
+0.02,174,2.0062262193012796,12,12,100.0
+0.05,434,5.004035512510089,12,12,100.0
+0.1,868,10.008071025020177,12,12,100.0
