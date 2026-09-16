@@ -1,0 +1,2 @@
+Experiment,Architecture,Augmentation,Accuracy,Precision,Recall,Specificity,F1,ROC_AUC,TN,FP,FN,TP
+C,3-block CNN + BatchNorm,Horizontal Flip + Vertical Flip + Rotation,0.762936221419976,0.6468401486988847,0.6304347826086957,0.8288288288288288,0.6385321100917432,0.7938960699830265,460,95,102,174
