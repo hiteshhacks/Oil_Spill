@@ -12,3 +12,7 @@ shapely
 streamlit
 seaborn 
 folium
+scikit-image
+torch 
+torchvision 
+torchaudio

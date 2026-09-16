@@ -1,0 +1,500 @@
+import os
+import random
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    confusion_matrix,
+    classification_report
+)
+
+
+# =========================
+# 1. Configuration
+# =========================
+
+DATA_DIR = "DATA/sar_dataset"
+
+IMG_SIZE = 224
+BATCH_SIZE = 32
+EPOCHS = 20
+SEED = 42
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+print("Device:", DEVICE)
+
+
+# =========================
+# 2. Reproducibility
+# =========================
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
+
+# =========================
+# 3. Image Preprocessing
+# =========================
+# Experiment A:
+# - Grayscale
+# - Resize
+# - Normalization
+# - NO augmentation
+
+transform = transforms.Compose([
+    transforms.Grayscale(num_output_channels=1),
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor()
+])
+
+
+# =========================
+# 4. Load Dataset
+# =========================
+
+train_dataset = datasets.ImageFolder(
+    os.path.join(DATA_DIR, "train"),
+    transform=transform
+)
+
+val_dataset = datasets.ImageFolder(
+    os.path.join(DATA_DIR, "val"),
+    transform=transform
+)
+
+test_dataset = datasets.ImageFolder(
+    os.path.join(DATA_DIR, "test"),
+    transform=transform
+)
+
+
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=True
+)
+
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=False
+)
+
+test_loader = DataLoader(
+    test_dataset,
+    batch_size=BATCH_SIZE,
+    shuffle=False
+)
+
+
+print("Classes:", train_dataset.classes)
+
+print("Train:", len(train_dataset))
+print("Validation:", len(val_dataset))
+print("Test:", len(test_dataset))
+
+
+# =========================
+# 5. CNN Model
+# =========================
+
+class CNNExperimentA(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.features = nn.Sequential(
+
+            # Block 1
+            nn.Conv2d(
+                in_channels=1,
+                out_channels=32,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            # Block 2
+            nn.Conv2d(
+                in_channels=32,
+                out_channels=64,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+
+            # Block 3
+            nn.Conv2d(
+                in_channels=64,
+                out_channels=128,
+                kernel_size=3,
+                padding=1
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d(2)
+        )
+
+        self.classifier = nn.Sequential(
+
+            nn.AdaptiveAvgPool2d((1, 1)),
+
+            nn.Flatten(),
+
+            nn.Linear(128, 64),
+
+            nn.ReLU(),
+
+            nn.Dropout(0.30),
+
+            nn.Linear(64, 1)
+        )
+
+
+    def forward(self, x):
+
+        x = self.features(x)
+
+        x = self.classifier(x)
+
+        return x
+
+
+model = CNNExperimentA().to(DEVICE)
+
+print(model)
+
+
+# =========================
+# 6. Class Weights
+# =========================
+
+# Train:
+# Class 0 = 2586
+# Class 1 = 1290
+
+n0 = 2586
+n1 = 1290
+
+total = n0 + n1
+
+weight_0 = total / (2 * n0)
+weight_1 = total / (2 * n1)
+
+print("Class weight 0:", weight_0)
+print("Class weight 1:", weight_1)
+
+
+# BCEWithLogitsLoss with positive class weight
+
+pos_weight = torch.tensor(
+    [weight_1 / weight_0],
+    dtype=torch.float32
+).to(DEVICE)
+
+criterion = nn.BCEWithLogitsLoss(
+    pos_weight=pos_weight
+)
+
+
+# =========================
+# 7. Optimizer
+# =========================
+
+optimizer = torch.optim.Adam(
+    model.parameters(),
+    lr=0.001
+)
+
+
+# =========================
+# 8. Training
+# =========================
+
+best_val_loss = float("inf")
+
+patience = 4
+counter = 0
+
+for epoch in range(EPOCHS):
+
+    # ---------------------
+    # Training
+    # ---------------------
+
+    model.train()
+
+    train_loss = 0.0
+
+    for images, labels in train_loader:
+
+        images = images.to(DEVICE)
+
+        labels = labels.float().unsqueeze(1).to(DEVICE)
+
+        optimizer.zero_grad()
+
+        outputs = model(images)
+
+        loss = criterion(outputs, labels)
+
+        loss.backward()
+
+        optimizer.step()
+
+        train_loss += loss.item()
+
+
+    train_loss /= len(train_loader)
+
+
+    # ---------------------
+    # Validation
+    # ---------------------
+
+    model.eval()
+
+    val_loss = 0.0
+
+    with torch.no_grad():
+
+        for images, labels in val_loader:
+
+            images = images.to(DEVICE)
+
+            labels = labels.float().unsqueeze(1).to(DEVICE)
+
+            outputs = model(images)
+
+            loss = criterion(outputs, labels)
+
+            val_loss += loss.item()
+
+
+    val_loss /= len(val_loader)
+
+
+    print(
+        f"Epoch [{epoch+1}/{EPOCHS}] "
+        f"Train Loss: {train_loss:.4f} "
+        f"Val Loss: {val_loss:.4f}"
+    )
+
+
+    # ---------------------
+    # Reduce learning rate
+    # ---------------------
+
+    if val_loss > best_val_loss:
+
+        counter += 1
+
+        if counter >= 2:
+
+            for param_group in optimizer.param_groups:
+
+                param_group["lr"] *= 0.5
+
+            counter = 0
+
+    else:
+
+        counter = 0
+
+
+    # ---------------------
+    # Early stopping
+    # ---------------------
+
+    if val_loss < best_val_loss:
+
+        best_val_loss = val_loss
+
+        torch.save(
+            model.state_dict(),
+            "cnn_experiment_a_best.pth"
+        )
+
+        print("Best model saved.")
+
+        patience_counter = 0
+
+    else:
+
+        if "patience_counter" not in locals():
+
+            patience_counter = 1
+
+        else:
+
+            patience_counter += 1
+
+        if patience_counter >= patience:
+
+            print("Early stopping.")
+
+            break
+
+
+# =========================
+# 9. Load Best Model
+# =========================
+
+model.load_state_dict(
+    torch.load(
+        "cnn_experiment_a_best.pth",
+        map_location=DEVICE
+    )
+)
+
+model.eval()
+
+
+# =========================
+# 10. Test Prediction
+# =========================
+
+y_true = []
+y_prob = []
+
+with torch.no_grad():
+
+    for images, labels in test_loader:
+
+        images = images.to(DEVICE)
+
+        outputs = model(images)
+
+        probabilities = torch.sigmoid(outputs)
+
+        y_true.extend(
+            labels.numpy()
+        )
+
+        y_prob.extend(
+            probabilities.cpu().numpy().flatten()
+        )
+
+
+y_true = np.array(y_true)
+
+y_prob = np.array(y_prob)
+
+y_pred = (y_prob >= 0.5).astype(int)
+
+
+# =========================
+# 11. Metrics
+# =========================
+
+accuracy = accuracy_score(
+    y_true,
+    y_pred
+)
+
+precision = precision_score(
+    y_true,
+    y_pred
+)
+
+recall = recall_score(
+    y_true,
+    y_pred
+)
+
+f1 = f1_score(
+    y_true,
+    y_pred
+)
+
+roc_auc = roc_auc_score(
+    y_true,
+    y_prob
+)
+
+
+# Confusion Matrix
+
+tn, fp, fn, tp = confusion_matrix(
+    y_true,
+    y_pred
+).ravel()
+
+
+specificity = tn / (tn + fp)
+
+
+# =========================
+# 12. Results
+# =========================
+
+print("\n==============================")
+print("CNN EXPERIMENT A RESULTS")
+print("==============================")
+
+print(f"Accuracy     : {accuracy:.4f}")
+print(f"Precision    : {precision:.4f}")
+print(f"Recall       : {recall:.4f}")
+print(f"Specificity  : {specificity:.4f}")
+print(f"F1 Score     : {f1:.4f}")
+print(f"ROC-AUC      : {roc_auc:.4f}")
+
+print("\nConfusion Matrix:")
+print(
+    confusion_matrix(
+        y_true,
+        y_pred
+    )
+)
+
+print("\nClassification Report:")
+print(
+    classification_report(
+        y_true,
+        y_pred,
+        target_names=["No Oil", "Oil"]
+    )
+)
+
+
+# =========================
+# 13. Save Results
+# =========================
+
+import pandas as pd
+
+results = pd.DataFrame([{
+    "Experiment": "A",
+    "Accuracy": accuracy,
+    "Precision": precision,
+    "Recall": recall,
+    "Specificity": specificity,
+    "F1": f1,
+    "ROC_AUC": roc_auc,
+    "TN": tn,
+    "FP": fp,
+    "FN": fn,
+    "TP": tp
+}])
+
+results.to_csv(
+    "cnn_experiment_a_results.csv",
+    index=False
+)
+
+print("\nResults saved to:")
+print("cnn_experiment_a_results.csv")
