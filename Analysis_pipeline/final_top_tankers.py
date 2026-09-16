@@ -122,16 +122,12 @@ print(
 )
 
 
-summary.to_csv(
-    "FINAL_top10_tanker_analysis.csv",
-    index=False
-)
+# summary.to_csv(
+#     "FINAL_top10_tanker_analysis.csv",
+#     index=False
+# )
 
-top10_anomalies.to_csv(
-    "FINAL_top10_anomalous_observations.csv",
-    index=False
-)
-
-print("\nSaved:")
-print("FINAL_top10_tanker_analysis.csv")
-print("FINAL_top10_anomalous_observations.csv")
+# top10_anomalies.to_csv(
+#     "FINAL_top10_anomalous_observations.csv",
+#     index=False
+# )
